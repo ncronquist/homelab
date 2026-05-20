@@ -1,0 +1,40 @@
+services:
+  adguard:
+    image: adguard/adguardhome:latest
+    container_name: adguard
+    restart: unless-stopped
+    # ---------------------------------------------------------------------------
+    # NO port 53 host binding — AdGuard is no longer the primary network DNS.
+    #
+    # DNS for *.home.ncronquist.com is handled natively by the UDM (managed via
+    # Terraform in networking/dns.tf). This eliminates the chicken-and-egg failure
+    # mode where Docker going down breaks network-wide DNS.
+    #
+    # AdGuard's role here is as a Tailscale Split DNS resolver:
+    #   - Tailscale admin console → DNS → Add nameserver → Restricted to
+    #     home.ncronquist.com → IP: <MacBook Tailscale IP> (see tailscale ip -4)
+    #   - AdGuard listens on its container IP for DNS queries from Tailscale
+    #   - AdGuard rewrites *.home.ncronquist.com → 192.168.4.31 (MacBook LAN IP)
+    #   - Remote clients (iPad, thin client) resolve homelab services correctly
+    #
+    # See: docs/runbooks/tailscale-split-dns.md
+    # ---------------------------------------------------------------------------
+    volumes:
+      - ./data/work:/opt/adguardhome/work
+      - ./data/conf:/opt/adguardhome/conf
+    networks:
+      proxy:
+      # Assign a static IP on the proxy network so the Tailscale Split DNS
+      # nameserver address is predictable and survives container restarts.
+      # After `docker compose up`, find the actual IP with:
+      #   docker inspect adguard --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  proxy:
+    external: true
+

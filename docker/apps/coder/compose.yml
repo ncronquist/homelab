@@ -1,0 +1,108 @@
+# =============================================================================
+# Coder — Self-Hosted Development Environments
+# =============================================================================
+# Coder server with a dedicated PostgreSQL database.
+# Web UI at coder.home.ncronquist.com with wildcard subdomain support
+# for workspace port forwarding and web terminals.
+#
+# Data is stored in Docker named volumes (coder_db_data, coder_config_data).
+# Named volumes survive `docker compose down` and require explicit
+# `docker volume rm` to delete — protecting critical workspace state.
+#
+# Requires: CODER_DB_PASSWORD set in .env
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # coder-db — PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  # Dedicated database for Coder application state.
+  # Runs on an internal network — not accessible outside this stack.
+  coder-db:
+    image: postgres:16-alpine
+    container_name: coder-db
+    # `always` ensures the DB comes back up after a Mac reboot automatically.
+    restart: always
+    environment:
+      - POSTGRES_USER=coder
+      - POSTGRES_PASSWORD=${CODER_DB_PASSWORD:?CODER_DB_PASSWORD must be set in .env}
+      - POSTGRES_DB=coder
+    volumes:
+      # Named volume — PostgreSQL data directory.
+      # Survives `docker compose down`. Use `docker volume rm coder_db_data` to delete.
+      - coder_db_data:/var/lib/postgresql/data
+    networks:
+      - coder
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coder -d coder"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # coder — Development Environment Server
+  # ---------------------------------------------------------------------------
+  # Manages templates, workspaces, and user access.
+  # Docker socket access allows provisioning workspace containers on this host.
+  coder:
+    image: ghcr.io/coder/coder:latest
+    container_name: coder
+    # `always` ensures Coder restarts after a Mac reboot — critical for
+    # remote dev sessions that may reconnect automatically.
+    restart: always
+    environment:
+      # Database connection
+      - CODER_PG_CONNECTION_URL=postgresql://coder:${CODER_DB_PASSWORD}@coder-db:5432/coder?sslmode=disable
+      # Public access URLs
+      - CODER_ACCESS_URL=https://coder.home.ncronquist.com
+      # Wildcard for workspace port forwarding and web terminals
+      - CODER_WILDCARD_ACCESS_URL=*.coder.home.ncronquist.com
+      # ---------------------------------------------------------------------------
+      # Reverse-proxy / WebSocket hardening
+      # ---------------------------------------------------------------------------
+      # Tell Coder it's behind a trusted reverse proxy (Caddy).
+      # Without these, Coder rejects WebSocket upgrade requests from proxied clients,
+      # breaking the web terminal, VS Code browser, and port-forwarding features.
+      - CODER_PROXY_TRUSTED_HEADERS=X-Forwarded-For,X-Real-IP
+      # Caddy's container IP is on the `proxy` Docker network. Using the network
+      # CIDR (172.x.x.x/16) as a trusted origin covers dynamic IP assignments.
+      - CODER_PROXY_TRUSTED_ORIGINS=172.16.0.0/12,192.168.0.0/16
+    volumes:
+      # Docker socket — allows Coder to provision workspace containers
+      # WARNING: Grants root-equivalent access on the host
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Named volume for Coder's own config/cache
+      - coder_config_data:/home/coder/.config
+    networks:
+      # External network for Caddy reverse proxy
+      - proxy
+      # Internal network for PostgreSQL access
+      - coder
+    depends_on:
+      coder-db:
+        condition: service_healthy
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  coder_db_data:
+    # PostgreSQL data — contains all Coder state: users, templates, workspaces.
+    # NEVER run `docker compose down -v` unless you intend to wipe Coder entirely.
+    # Backup: docker run --rm -v coder_db_data:/data -v $(pwd):/backup \
+    #           alpine tar czf /backup/coder_db_backup.tar.gz /data
+  coder_config_data:
+    # Coder server configuration and state cache.
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  # Shared network with Caddy reverse proxy
+  proxy:
+    external: true
+
+  # Internal network for Coder ↔ PostgreSQL communication
+  coder:
+    internal: true
+

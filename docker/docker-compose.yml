@@ -1,0 +1,16 @@
+# Homelab Docker Compose — Root Configuration
+#
+# Usage:
+#   Start all services:    docker compose up -d
+#   Stop all services:     docker compose down
+#   Validate config:       docker compose config
+#   View running services: docker compose ps
+
+include:
+  - path: ./apps/caddy/compose.yml
+  - path: ./apps/adguard/compose.yml
+  - path: ./apps/media/compose.yml
+  - path: ./apps/monitoring/compose.yml
+  - path: ./apps/calibre/compose.yml
+  - path: ./apps/gitea/compose.yml
+  - path: ./apps/coder/compose.yml

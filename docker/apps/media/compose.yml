@@ -1,0 +1,179 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Jellyfin — Media streaming server
+  # ---------------------------------------------------------------------------
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/jellyfin/config:/config
+      # Unified media root — all libraries accessible under /data/*
+      # Mounted read-only since Jellyfin only reads, never writes, media files
+      - ${MEDIA_PATH}:/data:ro
+      # Transcoding cache on the external SSD to avoid filling the internal drive.
+      # Jellyfin can write gigabytes of HLS segments during active transcoding.
+      - ${MEDIA_PATH}/.cache/jellyfin:/cache
+    networks:
+      - proxy
+      - media
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # TransmissionVPN — Torrent client with PIA VPN
+  # ---------------------------------------------------------------------------
+  transmission:
+    image: magicalyak/transmissionvpn:latest
+    container_name: transmission
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    environment:
+      - VPN_PROVIDER=${VPN_PROVIDER:-PIA}
+      - VPN_USERNAME=${VPN_USERNAME}
+      - VPN_PASSWORD=${VPN_PASSWORD}
+      - LOCAL_NETWORK=${LOCAL_NETWORK:-192.168.4.0/24}
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      # Config stays local — it's small (settings.json, resume files)
+      - ./data/transmission:/config
+      # Download data goes directly to the external SSD.
+      # Path inside container matches the unified /data root used by *arr apps,
+      # so Radarr/Sonarr can hardlink-move completed files without copying.
+      - ${MEDIA_PATH}:/data
+    networks:
+      - proxy
+      - media
+
+  # ---------------------------------------------------------------------------
+  # Radarr — Movie management & automation
+  # ---------------------------------------------------------------------------
+  #
+  # IMPORTANT — Unified /data mount and hardlinks:
+  # Both the download directory and the movie library are mounted under /data,
+  # which maps to the same external SSD filesystem. This allows Radarr to use
+  # hardlinks when importing completed downloads instead of copying the file.
+  #
+  # Configure Radarr's Root Folder as:    /data/movies
+  # Configure Radarr's Download Client as: /data/torrents  (category path)
+  # ---------------------------------------------------------------------------
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/radarr:/config
+      # Unified mount — /data/movies and /data/torrents on the same filesystem
+      - ${MEDIA_PATH}:/data
+    networks:
+      - proxy
+      - media
+    depends_on:
+      - transmission
+
+  # ---------------------------------------------------------------------------
+  # Sonarr — TV show management & automation
+  # ---------------------------------------------------------------------------
+  #
+  # IMPORTANT — Unified /data mount and hardlinks:
+  # Configure Sonarr's Root Folder as:    /data/tv
+  # Configure Sonarr's Download Client as: /data/torrents  (category path)
+  # ---------------------------------------------------------------------------
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/sonarr:/config
+      # Unified mount — /data/tv and /data/torrents on the same filesystem
+      - ${MEDIA_PATH}:/data
+    networks:
+      - proxy
+      - media
+    depends_on:
+      - transmission
+
+  # ---------------------------------------------------------------------------
+  # Prowlarr — Indexer management
+  # ---------------------------------------------------------------------------
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/prowlarr:/config
+    networks:
+      - proxy
+      - media
+
+  # ---------------------------------------------------------------------------
+  # Jellyseerr — Media request & discovery UI
+  # ---------------------------------------------------------------------------
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/jellyseerr:/app/config
+    networks:
+      - proxy
+      - media
+    depends_on:
+      - jellyfin
+
+  # ---------------------------------------------------------------------------
+  # Recyclarr — TRaSH guide sync (no web UI)
+  # ---------------------------------------------------------------------------
+  recyclarr:
+    image: recyclarr/recyclarr:latest
+    container_name: recyclarr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/recyclarr:/config
+    networks:
+      - media
+
+  # ---------------------------------------------------------------------------
+  # Cleanuparr — Auto-cleanup (no web UI)
+  # ---------------------------------------------------------------------------
+  cleanuparr:
+    image: ghcr.io/cjmcquire/cleanuparr:latest
+    container_name: cleanuparr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      - ./data/cleanuparr:/config
+    networks:
+      - media
+
+networks:
+  proxy:
+    external: true
+  media:
+    driver: bridge
+
