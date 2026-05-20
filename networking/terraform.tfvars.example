@@ -1,0 +1,11 @@
+# Networking Terraform Variables
+# Copy this file to terraform.tfvars and fill in your values.
+# DO NOT commit terraform.tfvars to git.
+
+# Static LAN IP of the MacBook Pro running OrbStack + Caddy.
+# All homelab service DNS A-records (dns.tf) will point to this address.
+# Set a DHCP reservation in the UDM for this MAC address to keep it stable.
+macbook_ip = "192.168.4.31"
+
+# Override the default domain suffix if needed (default: home.ncronquist.com)
+# home_domain = "home.ncronquist.com"

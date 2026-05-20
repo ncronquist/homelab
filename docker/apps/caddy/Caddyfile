@@ -1,0 +1,178 @@
+{
+	# Uncomment the line below to use Let's Encrypt staging for testing.
+	# This avoids rate limits while debugging certificate issuance.
+	# Remove once everything is working to get real trusted certificates.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# =============================================================================
+# Wildcard — *.home.ncronquist.com
+# =============================================================================
+# All homelab service subdomains. TLS certificate obtained via Cloudflare
+# DNS-01 challenge (no inbound ports needed).
+# =============================================================================
+*.home.ncronquist.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+
+	# =====================
+	# Media Services
+	# =====================
+
+	@jellyfin host jellyfin.home.ncronquist.com
+	handle @jellyfin {
+		reverse_proxy jellyfin:8096
+	}
+
+	@transmission host transmission.home.ncronquist.com
+	handle @transmission {
+		reverse_proxy transmission:9091
+	}
+
+	@radarr host radarr.home.ncronquist.com
+	handle @radarr {
+		reverse_proxy radarr:7878
+	}
+
+	@sonarr host sonarr.home.ncronquist.com
+	handle @sonarr {
+		reverse_proxy sonarr:8989
+	}
+
+	@prowlarr host prowlarr.home.ncronquist.com
+	handle @prowlarr {
+		reverse_proxy prowlarr:9696
+	}
+
+	@jellyseerr host jellyseerr.home.ncronquist.com
+	handle @jellyseerr {
+		reverse_proxy jellyseerr:5055
+	}
+
+	# =====================
+	# DNS & Networking
+	# =====================
+
+	@adguard host adguard.home.ncronquist.com
+	handle @adguard {
+		reverse_proxy adguard:3000
+	}
+
+	# =====================
+	# Monitoring
+	# =====================
+
+	@status host status.home.ncronquist.com
+	handle @status {
+		reverse_proxy uptime-kuma:3001
+	}
+
+	@beszel host beszel.home.ncronquist.com
+	handle @beszel {
+		reverse_proxy beszel:8090
+	}
+
+	@logs host logs.home.ncronquist.com
+	handle @logs {
+		reverse_proxy dozzle:8080
+	}
+
+	# =====================
+	# Books
+	# =====================
+
+	@calibre host calibre.home.ncronquist.com
+	handle @calibre {
+		reverse_proxy calibre:8080
+	}
+
+	@books host books.home.ncronquist.com
+	handle @books {
+		reverse_proxy calibre-web:8083
+	}
+
+	# =====================
+	# Dev Tools
+	# =====================
+
+	@git host git.home.ncronquist.com
+	handle @git {
+		reverse_proxy gitea:3000
+	}
+
+	# ---------------------------------------------------------------------------
+	# Coder — WebSocket-aware reverse proxy
+	# ---------------------------------------------------------------------------
+	# Coder uses WebSockets extensively:
+	#   - Web terminal (xterm.js)
+	#   - VS Code in the browser (Monaco editor live updates)
+	#   - Workspace status polling
+	#   - Port-forwarding tunnels
+	#
+	# `flush_interval -1` disables Caddy's response buffering so WebSocket
+	# frames are forwarded immediately rather than batched. Without this,
+	# the web terminal appears frozen or has multi-second input lag.
+	#
+	# `header_up Upgrade` and `header_up Connection` pass the HTTP upgrade
+	# request through to Coder so it can complete the WebSocket handshake.
+	# ---------------------------------------------------------------------------
+	@coder host coder.home.ncronquist.com
+	handle @coder {
+		reverse_proxy coder:7080 {
+			header_up Host              {upstream_hostport}
+			header_up X-Real-IP        {remote_host}
+			header_up X-Forwarded-For  {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			# WebSocket upgrade passthrough
+			header_up Upgrade    {http.request.header.Upgrade}
+			header_up Connection {http.request.header.Connection}
+			# Disable buffering — required for WebSocket and streaming responses
+			flush_interval -1
+		}
+	}
+
+	# =====================
+	# Fallback
+	# =====================
+
+	handle {
+		respond "Service not found" 404
+	}
+}
+
+# =============================================================================
+# Wildcard — *.coder.home.ncronquist.com
+# =============================================================================
+# Coder uses this wildcard for workspace-level features:
+#   - Port forwarding:  <port>--<workspace>--<agent>.coder.home.ncronquist.com
+#   - Web terminal:     accessed via workspace subdomain
+#   - VS Code browser:  served on a workspace subdomain
+#
+# This requires a SEPARATE TLS certificate from *.home.ncronquist.com because
+# a wildcard cert only covers one level (*.home.ncronquist.com does NOT cover
+# *.coder.home.ncronquist.com). Caddy obtains both certs automatically via
+# the Cloudflare DNS-01 challenge.
+#
+# The UDM DNS wildcard record `*.coder.home.ncronquist.com → 192.168.4.31`
+# must also exist. See networking/dns.tf (terrifi_dns_record.coder_wildcard).
+# =============================================================================
+*.coder.home.ncronquist.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+
+	# All workspace subdomains route to the Coder server.
+	# Coder inspects the subdomain to determine which workspace/port to route to.
+	reverse_proxy coder:7080 {
+		header_up Host              {upstream_hostport}
+		header_up X-Real-IP        {remote_host}
+		header_up X-Forwarded-For  {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		# WebSocket support for web terminal and VS Code
+		header_up Upgrade    {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+		flush_interval -1
+	}
+}
+

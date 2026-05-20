@@ -1,0 +1,65 @@
+# =============================================================================
+# Gitea — Self-Hosted Git Server
+# =============================================================================
+# Lightweight Git service with web UI at git.home.ncronquist.com
+# Uses SQLite for simplicity — no external database required.
+# SSH is exposed on port 2222 to avoid conflicts with the host SSH daemon.
+#
+# Data is stored in a Docker named volume (gitea_data) rather than a bind-mount.
+# Named volumes are immune to accidental deletion via path errors or rm -rf.
+# To intentionally delete: docker volume rm gitea_data  (requires explicit action)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Gitea — Git Server
+  # ---------------------------------------------------------------------------
+  gitea:
+    image: gitea/gitea:latest
+    container_name: gitea
+    # `always` ensures Gitea restarts after a Mac reboot, not just a crash.
+    # Critical infrastructure should never stay down after a power cycle.
+    restart: always
+    environment:
+      # File ownership (match host user)
+      - USER_UID=501
+      - USER_GID=20
+      # Database — embedded SQLite, no external DB needed
+      - GITEA__database__DB_TYPE=sqlite3
+      # Server — public-facing domain and URL
+      - GITEA__server__DOMAIN=git.home.ncronquist.com
+      - GITEA__server__ROOT_URL=https://git.home.ncronquist.com
+      # SSH clone URL — tells Gitea to advertise port 2222 in clone instructions
+      - GITEA__server__SSH_DOMAIN=git.home.ncronquist.com
+      - GITEA__server__SSH_PORT=2222
+    volumes:
+      # Named volume — all Gitea data: repos, database, config, avatars, LFS
+      # Survives `docker compose down`. Use `docker volume rm gitea_data` to delete.
+      - gitea_data:/data
+      # Timezone from host (read-only)
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      # SSH access on non-standard port to avoid host SSH conflict
+      # HTTP (port 3000) is proxied via Caddy — not exposed to host
+      - "2222:22"
+    networks:
+      - proxy
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  gitea_data:
+    # No `external: true` — Docker manages this volume.
+    # It persists across `docker compose down` (without -v flag).
+    # Backup: docker run --rm -v gitea_data:/data -v $(pwd):/backup \
+    #           alpine tar czf /backup/gitea_data_backup.tar.gz /data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  # Shared network with Caddy reverse proxy
+  proxy:
+    external: true
+

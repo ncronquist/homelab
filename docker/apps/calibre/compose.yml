@@ -1,0 +1,65 @@
+# =============================================================================
+# Calibre — E-book Management Stack
+# =============================================================================
+# Calibre:     Full library management UI at calibre.home.ncronquist.com
+# Calibre-Web: Polished reading interface at books.home.ncronquist.com
+#
+# Both services share the book library on an external SSD.
+# Calibre has read/write access; Calibre-Web has read-only access.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Calibre — Library Manager
+  # ---------------------------------------------------------------------------
+  # Desktop-like e-book management accessible via web browser.
+  # Use this to import, organize, convert, and manage your library.
+  calibre:
+    image: linuxserver/calibre:latest
+    container_name: calibre
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-America/Los_Angeles}
+    volumes:
+      # Calibre configuration, preferences, and plugins
+      - ./data/calibre:/config
+      # Book library on external SSD (read/write)
+      - /Volumes/teamgroupqx/media/books:/books
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Calibre-Web — Reading Interface
+  # ---------------------------------------------------------------------------
+  # Modern, responsive web UI for browsing and reading books.
+  # Mounts the library as read-only — all management is done via Calibre.
+  # The universal-calibre mod enables server-side e-book format conversion.
+  calibre-web:
+    image: linuxserver/calibre-web:latest
+    container_name: calibre-web
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-America/Los_Angeles}
+      # Installs Calibre binaries for server-side ebook conversion
+      - DOCKER_MODS=linuxserver/mods:universal-calibre
+    volumes:
+      # Calibre-Web configuration, user database, and cache
+      - ./data/calibre-web:/config
+      # Book library on external SSD (read-only)
+      - /Volumes/teamgroupqx/media/books:/books:ro
+    networks:
+      - proxy
+    depends_on:
+      - calibre
+    restart: unless-stopped
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  # Shared network with Caddy reverse proxy
+  proxy:
+    external: true
